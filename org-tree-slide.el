@@ -16,6 +16,7 @@
 ;;             Stefano BENNATI
 ;;             Matus Goljer
 ;;             Boruch Baum
+;;             Gunther Bachmann
 ;;
 ;; This program is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -67,6 +68,24 @@
 ;;       M-x org-tree-slide-narrowing-control-profile
 ;;
 ;;    Type `C-h f org-tree-slide-mode', you can find more detail.
+;;
+;; If you want a timer of remaining time of the current slide, put this line at the
+;; the end of your presentation org mode file (e.g. for 30 min in total):
+;;
+;;       # Local Variables:
+;;       # org-tree-slide-presentation-length: 30
+;;       # End:
+;;
+;; As soon as you start going forward to a slide, the timer starts. It is
+;; automatically restarted on the next slide, with the then remaining time for
+;; that slide. Time for the slides is evenly distributed and as such just
+;; an indicator for the speaker.
+;; Going back slides will simply stop the timer. Going forward again will start it.
+;;
+;; You may modify the org notification if a timer runs out by putting the following
+;; into the file local variable section mentioned above
+;;
+;;       # eval: (setq org-show-notification-handler #'(lambda (msg) (message "times up")))
 ;;
 ;; Note:
 ;;    - Make sure key maps below when you introduce this elisp.
@@ -251,6 +270,11 @@ If you want to show anything, just specify nil."
 (defvar org-tree-slide-before-content-view-hook nil
   "A hook run before showing the content.")
 
+(defvar org-tree-slide-presentation-length nil
+  "Number of minutes this presentation should take")
+(defvar org-tree-slide-started nil
+  "time at which the presentation actually started")
+
 ;;;###autoload
 (define-minor-mode org-tree-slide-mode
   "A presentation tool for org-mode.
@@ -359,6 +383,10 @@ Profiles:
   "Display the next slide."
   (interactive)
   (when (org-tree-slide--active-p)
+    (unless org-tree-slide-started
+      (setq org-tree-slide-started (org-time-add nil 0)))
+    (when org-timer-start-time
+      (org-timer-stop))
     (let ((msg (plist-get org-tree-slide-indicator :next))
           (message-log-max nil))
       (when msg
@@ -373,23 +401,45 @@ Profiles:
                 (not (org-at-heading-p)))
            (and (= (point-at-bol) 1) (not (buffer-narrowed-p))))
        (or (org-tree-slide--first-heading-with-narrow-p)
-           (not (org-at-heading-p))))
+          (not (org-at-heading-p))))
       (run-hooks 'org-tree-slide-before-move-next-hook)
       (widen)
       (org-tree-slide--outline-next-heading)
       (org-tree-slide--display-tree-with-narrow))
      ;; stay the same slide (for CONTENT MODE, on the subtrees)
-     (t (org-tree-slide--display-tree-with-narrow)))))
+     (t (org-tree-slide--display-tree-with-narrow)))
+    (let ((current-slide (org-tree-slide--count-slide (point))))
+      (unless (equal org-tree-slide-modeline-display 'outside)
+        (message (format "   %s Next >>" current-slide)))
+      (when org-tree-slide-presentation-length
+        (org-tree-slide--update-slide-timer current-slide)))))
+
+(defun org-tree-slide--update-slide-timer (current-slide)
+  "update org-timer running for this presentation"
+  (let* ((slide-info (s-match "\\[\\(.*\\)/\\(.*\\)\\]" current-slide))
+         (cur-slide  (string-to-number (nth 1 slide-info)))
+         (num-slides (string-to-number (nth 2 slide-info)))
+         (sec-per-slide (/ (* 60 org-tree-slide-presentation-length) num-slides))
+         (rem-secs (floor
+                    (float-time (org-time-subtract (org-time-add org-tree-slide-started (* sec-per-slide cur-slide))
+                                                   (org-time-add nil 0))))))
+    (if (> rem-secs 0)
+        (org-timer-set-timer (org-timer-secs-to-hms rem-secs))
+      (message (format "hurry up, got to catch up %s seconds" (- 0 rem-secs))))))
 
 ;;;###autoload
 (defun org-tree-slide-move-previous-tree ()
   "Display the previous slide."
   (interactive)
   (when (org-tree-slide--active-p)
+    (when org-timer-start-time
+      (org-timer-stop))
     (let ((msg (plist-get org-tree-slide-indicator :previous))
           (message-log-max nil))
       (when msg
         (message "%s" msg)))
+    (unless (equal org-tree-slide-modeline-display 'outside)
+      (message "<< Previous"))
     (org-tree-slide--hide-slide-header)		; for at the first heading
     (run-hooks 'org-tree-slide-before-move-previous-hook)
     (widen)
@@ -402,6 +452,9 @@ Profiles:
      (t (org-tree-slide--outline-previous-heading)))
     (org-tree-slide--display-tree-with-narrow)
     ;; To avoid error of missing header in Emacs24
+    (let ((current-slide (org-tree-slide--count-slide (point))))
+      (unless (equal org-tree-slide-modeline-display 'outside)
+        (message (format "<< Previous %s" current-slide))))
     (if (= emacs-major-version 24)
         (goto-char (point-min)))))
 
@@ -547,13 +600,18 @@ This is displayed by default if `org-tree-slide-modeline-display' is nil.")
 
 (defun org-tree-slide--setup ()
   "Setup."
+  (setq org-tree-slide-started nil)
+  (setq org-timer-start-time nil)
   (when (org-tree-slide--active-p)
     (org-tree-slide--play)))
 
 (defun org-tree-slide--abort ()
   "Abort."
+  (when org-timer-start-time
+    (org-timer-stop))
   (when (equal major-mode 'org-mode)
-    (org-tree-slide--stop)))
+    (org-tree-slide--stop)
+    (setq org-tree-slide-started nil)))
 
 (defun org-tree-slide--play ()
   "Start slide view with the first tree of the org mode buffer."
@@ -610,13 +668,17 @@ This is displayed by default if `org-tree-slide-modeline-display' is nil.")
     (setq org-tree-slide--previous-line (org-tree-slide--line-number-at-pos)))
   (goto-char (point-at-bol))
   (unless (org-tree-slide--before-first-heading-p)
-    (hide-subtree)	; support CONTENT (subtrees are shown)
+    (if (version<= "25.1" emacs-version)
+        (outline-hide-subtree)
+      (hide-subtree))	; support CONTENT (subtrees are shown)
     (org-show-entry)
     ;; If this is the last level to be displayed, show the full content
     (if (and (not org-tree-slide-fold-subtrees-skipped)
              (org-tree-slide--heading-level-skip-p (1+ (org-outline-level))))
         (org-tree-slide--show-subtree)
-      (show-children))
+      (if (version<= "25.1" emacs-version)
+          (outline-show-children)
+        (show-children)))
     ;;    (org-cycle-hide-drawers 'all) ; disabled due to performance reduction
     (org-narrow-to-subtree))
   (when org-tree-slide-slide-in-effect
@@ -632,8 +694,12 @@ This is displayed by default if `org-tree-slide-modeline-display' is nil.")
     (outline-map-region
      (lambda ()
        (if (org-tree-slide--heading-skip-comment-p)
-           (hide-subtree)
-         (show-subtree)
+           (if (version<= "25.1" emacs-version)
+               (outline-hide-subtree)
+             (hide-subtree))
+         (if (version<= "25.1" emacs-version)
+             (outline-show-subtree)
+           (show-subtree))
          (org-cycle-hide-drawers 'all)))
      (point)
      (progn (outline-end-of-subtree)

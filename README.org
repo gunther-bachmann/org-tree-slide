@@ -175,6 +175,8 @@ If you feel the cursor moving is very slow, please change a value of =org-tree-s
 | 15 | org-tree-slide-breadcrumbs                 | " > "         | String  |
 | 16 | org-tree-slide-breadcrumbs-hide-todo-state | t             | Boolean |
 | 17 | org-tree-slide-indicator                   | plist         | [*2]    |
+| 18 | org-tree-slide-started                     | nil           | time    |
+| 19 | org-tree-slide-presentation-length         | nil           | Numeric |
 
 #+begin_quote
 [*1] { nil| 'lighter | 'outside }
@@ -208,6 +210,31 @@ In this case, =<f8>= / =<f9>= / =<f10>= / =<f11>= are assigned in order to contr
   (setq org-tree-slide-skip-done nil)))
 #+end_src
 
+ If you want to display a timer of remaining time of the current slide,
+ put this line at the end of your presentation org mode file (e.g. for
+ 30 min in total):
+
+#+BEGIN_SRC emacs-lisp
+       # Local Variables:
+       # org-tree-slide-presentation-length: 30
+       # End:
+#+END_SRC
+
+ As soon as you start going forward to a slide, the timer starts. It is
+ automatically restarted on the next slide, with the then remaining time for
+ that slide. Time for the slides is evenly distributed and as such just
+ an indicator for the speaker.
+
+ Going back slides will simply stop the timer. Going forward again will start it.
+
+ You may modify the org notification if a timer runs out by putting the following
+ into the file local variable section mentioned above
+
+#+BEGIN_SRC emacs-lisp
+       # eval: (setq org-show-notification-handler #'(lambda (msg) (message "time is up")))
+#+END_SRC
+
+
 * 6. Functions
 ** Control functions
 
@@ -221,6 +248,10 @@ These functions will toggle =org-tree-slide-mode= ON, automatically.
 
   - org-tree-slide-without-init-play
   - org-tree-slide-play-with-timer
+
+** Remaining time display options
+
+  - org-tree-slide-presentation-length
 
 ** Toggle variables
 
