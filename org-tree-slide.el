@@ -263,6 +263,8 @@ If you want to show anything, just specify nil."
   "A hook run before evaluating `org-tree-slide--display-tree-with-narrow'.")
 (defvar org-tree-slide-after-narrow-hook nil
   "A hook run after evaluating `org-tree-slide--display-tree-with-narrow'.")
+(defvar org-tree-slide-after-narrow-before-animation-hook nil
+  "A hook run evaluating `org-tree-slide--display-tree-with-narrow' before doing the animation.")
 (defvar org-tree-slide-before-move-next-hook nil
   "A hook run before moving to the next slide.")
 (defvar org-tree-slide-before-move-previous-hook nil
@@ -681,6 +683,7 @@ This is displayed by default if `org-tree-slide-modeline-display' is nil.")
         (show-children)))
     ;;    (org-cycle-hide-drawers 'all) ; disabled due to performance reduction
     (org-narrow-to-subtree))
+  (run-hooks 'org-tree-slide-after-narrow-before-animation-hook)
   (when org-tree-slide-slide-in-effect
     (org-tree-slide--slide-in org-tree-slide-slide-in-blank-lines))
   (when org-tree-slide-header
